@@ -38,7 +38,7 @@ class motor // 單一馬達的類別
     float pulsePerRotation=480;
     float Ki=0.15,Kp=0.9,Kd=0.05;
     float deltaTime = 0.010; 
-    float target_angle;
+    float target_angle=0;
     motor a();
     motor b();
     motor c();
@@ -145,7 +145,6 @@ void setup() {
     motor *motor1 = new motor(motor_sid,pins[motor_sid]);
     motor_list.push_back(motor1);
     motor_sid=(motor_sid==2)? 0:motor_sid+1;
-    // Serial.println(motor_list[i]->mPID);
 
   }
   
@@ -154,22 +153,34 @@ void setup() {
 
 bool test=true;
 bool lock=false,menu_msg=true,show_angle=false,set_angle=false,show_msg=true,motor_set_sig=false;
-String str;
+String str,spt_str;
 char* result;
 const char * spliter=",";
 float val=0;
 float angleTargettmp1=0,angleTargettmp2=0,angleTargettmp3=0,angleTargettmp4=0,angleTargettmp5=0,angleTargettmp6=0;
-int motor_select=-1;
+int motor_select=-1,comma_pos=0;
 bool relative=false;
+bool array_input=false;
+bool array_message=false;
+Vector<float> angle_arr;
+float max_angle_num[18];
+bool show_target=false;
+
+
 
 void loop() {
   PB1.events();
   PB2.events();
+  angle_arr.setStorage(max_angle_num);
   static uint32_t t = millis();
+
+  //顯示main menu
   if(menu_msg) {
     Serial.println("which service do you want to use? 1:monitor motors ; 2:set motors angle ;");
     menu_msg=false;
   }
+
+  //顯示monitor motor資訊
   if(show_angle){
     if(show_msg){
       Serial.println("Enter -1 to exit ");
@@ -189,20 +200,85 @@ void loop() {
     }
   }
 
+
   if(set_angle){
+
+    if(show_target){
+      Serial.println();
+      for (int i=0;i<motor_num;i++){
+        Serial.println(String("")+"Motor"+(i+1)+"'s target angle is "+motor_list[i]->target_angle);
+      }
+      Serial.println();
+      show_target=false;
+    }
+
+    //顯示set angle menu資訊
     if(show_msg){
-      Serial.println("which motor do you want to set? 1 mean motor1 ; -1:exit ; -2:switch absolute/relate angle");
+      Serial.println("which motor do you want to set? 1 mean motor1 \n -1:exit \n -2:switch absolute/relate angle \n -3:multimotor input \n -4:show current motor's target value");
       show_msg=false; 
+    }
+
+    //顯示array input資訊
+    if (array_message){
+      Serial.println("Please input array");
+      Serial.println("Attention : array 's elements quantities must be same as motor quantities");
+      Serial.println("eg : input 6 motor 's angle wiil be like 100,-100,150,0,12.7,-12.7 ");
+      array_message=false;
     }
   }
 
-  while(Serial.available()>0){
-    val=Serial.parseFloat();
-    Serial.flush();
-    // Serial.println(val);
 
-    if(set_angle && motor_set_sig && motor_select!=-1){
+  while(Serial.available()>0){
+
+    //處理輸入數值
+    if(array_input && set_angle){
+      str=Serial.readString();
+      if(str.toFloat()==-1){
+        array_input=false;
+        show_msg=true;
+        break;
+      }
+      
+      while (str.indexOf(",",comma_pos)!=-1)
+      {
+        spt_str=str.substring(comma_pos,str.indexOf(",",comma_pos));
+        angle_arr.push_back(spt_str.toFloat());
+        comma_pos=str.indexOf(",",comma_pos)+1;
+      }
+      
+      angle_arr.push_back(str.substring(comma_pos,str.length()).toFloat());
+      comma_pos=0;
+      motor_set_sig=true;
+      if (int(angle_arr.size())!=motor_num){
+        Serial.println("Array's elements quantities not same as motors' quantities!!");
+        motor_set_sig=false;
+      }
+    }else{
+      val=Serial.parseFloat();
+    }
+    Serial.flush();
+
+    // 處理array input
+    if(set_angle  && array_input && motor_set_sig){
+      // Serial.print("Array size: ");
+      // Serial.println(sizeof(angle_arr));
+
+      for (int i=0;i<int(angle_arr.size());i++){
+        if(i<3){
+          send_angle(&PB1,motor_list[i],angle_arr[i],1,relative);
+        }else if(i<6){
+          send_angle(&PB2,motor_list[i],angle_arr[i],2,relative);
+        }
+      }
+      motor_select=-1;
+      show_msg=true;
       motor_set_sig=false;
+      array_input=false;
+      break;
+    }
+
+    //處理single input
+    if(set_angle && motor_set_sig && motor_select!=-1 && !array_input){
       if(motor_select<3){
         send_angle(&PB1,motor_list[motor_select],val,1,relative);
       }
@@ -211,9 +287,11 @@ void loop() {
       }
       motor_select=-1;
       show_msg=true;
+      motor_set_sig=false;
       break;
     }
 
+    //處理set motor menu 選項
     if(set_angle && !motor_set_sig){
       // Serial.println(lock);
       if(val==-1){
@@ -223,15 +301,24 @@ void loop() {
       }else if( val>0 && val<motor_num){
         motor_set_sig=true;
         motor_select=int(val-1);
-        Serial.print("current motor");
-        Serial.print(motor_select+1);
-        Serial.print("'target angle is ");
-        Serial.println(motor_list[motor_select]->target_angle);
+        Serial.println(String("")+"current motor" + (motor_select+1) + "'target angle is " + motor_list[motor_select]->target_angle);
+        // Serial.print(motor_select+1);
+        // Serial.print("'target angle is ");
+        // Serial.println(motor_list[motor_select]->target_angle);
         Serial.println("Please enter the angle");
       }else if(val==-2){
         relative=!relative;
         if(relative) Serial.println("already change to relative mode");
         else Serial.println("already change to absulte mode");
+        show_msg=true;
+      }else if (val==-3){
+        array_input=true;
+        array_message=true;
+        // if(array_input) Serial.println("array input");
+        // else Serial.println("single input");
+        // show_msg=true;
+      }else if (val==-4){
+        show_target=true;
         show_msg=true;
       }else{
         Serial.println("Motor doesn't exist");
@@ -239,6 +326,7 @@ void loop() {
       }
     }
 
+    //處理main menu
     if(!show_angle && !set_angle){
       if(int(val)==1){
         show_angle=true;
@@ -253,14 +341,15 @@ void loop() {
       }
     }
 
+    //處理離開monitor angle部分
     if(show_angle){
       switch (int(val))
       {
-      case -1:
-        show_angle=false;
-        menu_msg=true;
-        show_msg=true;
-        break;
+        case -1:
+          show_angle=false;
+          menu_msg=true;
+          show_msg=true;
+          break;
       }
     }
 
