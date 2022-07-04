@@ -5,11 +5,15 @@
 #include "Vector.h"
 #include "SPI_MSTransfer_T4/SPI_MSTransfer_MASTER.h"
 
-SPI_MSTransfer_MASTER<&SPI,9, 0x0001> PB1;
-SPI_MSTransfer_MASTER<&SPI,10, 0x0002> PB2;
+SPI_MSTransfer_MASTER<&SPI,4, 0x0001> PB1;
+SPI_MSTransfer_MASTER<&SPI,5, 0x0002> PB2;
+SPI_MSTransfer_MASTER<&SPI,6, 0x0003> PB3;
 
-int motor_num=6;
-int slave_num=2;
+// Vector<auto> SPI_SLAVE;
+
+
+int motor_num=9;
+int slave_num=3;
 
 using namespace std;
 
@@ -111,15 +115,15 @@ void send_angle(auto* PB,motor * motor,float angle,int PB_ID,bool relative){
 int i=0;
 void myCB(uint16_t *buffer, uint16_t length, AsyncMST info) {
 
-  for(int ID=0;ID<2;ID++){
-    if(int(info.packetID)==0){
-      for(int i=0;i<3;i++){
-        if(motor_list[3*ID+i]->mPID==buffer[0]){
-          motor_list[3*ID+i]->Angle=buffer[1+i*3]*(1+(-2)*buffer[2+i*3]);
-        }
-      }
+  // for(int ID=0;ID<2;ID++){
+    // if(int(info.packetID)==0){
+  for(int i=0;i<3;i++){
+    if(motor_list[3*(int(info.packetID))+i]->mPID==buffer[0]){
+      motor_list[3*(int(info.packetID))+i]->Angle=buffer[1+i*3]*(1+(-2)*buffer[2+i*3]);
     }
   }
+    // }
+  // }
 }
 
 motor * max_motor_num[18];
@@ -130,15 +134,20 @@ void setup() {
   SPI.begin();
   PB1.begin();
   PB2.begin();
-  pinMode(10, OUTPUT);
-  pinMode(9, OUTPUT);
-  digitalWrite(10, 1);
-  digitalWrite(9, 1);
+  PB3.begin();
+  pinMode(4, OUTPUT);
+  pinMode(5, OUTPUT);
+  pinMode(6, OUTPUT);
+  digitalWrite(4, 1);
+  digitalWrite(5, 1);
+  digitalWrite(6, 1);
   PB1.pinMode(9,OUTPUT);
   PB2.pinMode(9,OUTPUT);
+  PB3.pinMode(9,OUTPUT);
 
   PB1.onTransfer(myCB);
   PB2.onTransfer(myCB);
+  PB3.onTransfer(myCB);
   motor_list.setStorage(max_motor_num);
 
   for ( int i=0 ; i < motor_num ; i++){
@@ -151,7 +160,7 @@ void setup() {
 }
 
 
-bool test=true;
+int test=0;
 bool lock=false,menu_msg=true,show_angle=false,set_angle=false,show_msg=true,motor_set_sig=false;
 String str,spt_str;
 char* result;
@@ -171,6 +180,7 @@ bool show_target=false;
 void loop() {
   PB1.events();
   PB2.events();
+  PB3.events();
   angle_arr.setStorage(max_angle_num);
   static uint32_t t = millis();
 
@@ -195,7 +205,7 @@ void loop() {
         Serial.print("'s angle: ");
         Serial.println((motor_list[i])->Angle);
         // Serial.println(0.0001);
-        Serial.println();
+        // Serial.println();
       }
     }
   }
@@ -268,6 +278,8 @@ void loop() {
           send_angle(&PB1,motor_list[i],angle_arr[i],1,relative);
         }else if(i<6){
           send_angle(&PB2,motor_list[i],angle_arr[i],2,relative);
+        }else if(i<9){
+          send_angle(&PB3,motor_list[i],angle_arr[i],3,relative);
         }
       }
       motor_select=-1;
@@ -285,6 +297,9 @@ void loop() {
       else if(motor_select<6){
         send_angle(&PB2,motor_list[motor_select],val,2,relative);
       }
+      else if(motor_select<9){
+        send_angle(&PB3,motor_list[motor_select],val,3,relative);
+      }
       motor_select=-1;
       show_msg=true;
       motor_set_sig=false;
@@ -298,7 +313,7 @@ void loop() {
         show_msg=true;
         menu_msg=true;
         set_angle=false;
-      }else if( val>0 && val<motor_num){
+      }else if( val>0 && val<=motor_num){
         motor_set_sig=true;
         motor_select=int(val-1);
         Serial.println(String("")+"current motor" + (motor_select+1) + "'target angle is " + motor_list[motor_select]->target_angle);
@@ -360,9 +375,13 @@ void loop() {
   }
 
   if ( millis() - t > 1000 ) {
-    test=!test;
-    PB1.digitalWrite(9,test);
-    PB2.digitalWrite(9,!test);
+    
+    // Serial.println(test);
+    PB1.digitalWrite(9,test==0);
+    PB2.digitalWrite(9,test==1);
+    PB3.digitalWrite(9,test==2);
+    test++;
+    if(test==3) test=0;
     t = millis();
   }
   delay(1);
