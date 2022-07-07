@@ -9,11 +9,8 @@ SPI_MSTransfer_MASTER<&SPI,4, 0x0001> PB1;
 SPI_MSTransfer_MASTER<&SPI,5, 0x0002> PB2;
 SPI_MSTransfer_MASTER<&SPI,6, 0x0003> PB3;
 
-// Vector<auto> SPI_SLAVE;
-
-
-int motor_num=9;
-int slave_num=3;
+int motor_num=9;  //設定要控制的motor數量
+int slave_num=3;  //設定要控制的slave數量
 
 using namespace std;
 
@@ -95,17 +92,12 @@ class motor // 單一馬達的類別
 Vector<motor*> motor_list;
 int motor_sid=0;
 
-void run_motor(auto PB,auto motor){
+//傳送target angle到各slave
+void send_angle(auto* PB,motor * motor,float val,int PB_ID,bool relative,bool dis){
 
-  PB.analogWrite(motor.pwmpin,motor.pwm);
-  PB.digitalWrite(motor.dirpin,motor.dir);
-
-}
-
-void send_angle(auto* PB,motor * motor,float angle,int PB_ID,bool relative){
-
-  if (relative) motor->target_angle=motor->target_angle+angle;
-  else motor->target_angle=angle;
+  if(dis) val=(val/10)*360;
+  if (relative) motor->target_angle=motor->target_angle+val;
+  else motor->target_angle=val;
   motor->dir = (motor->target_angle>0) ? LOW :HIGH ;
   uint16_t buf[3] = {motor->mPID,fabs(int(motor->target_angle)),motor->dir};
   PB->transfer16(buf, sizeof(buf),PB_ID);
@@ -113,17 +105,14 @@ void send_angle(auto* PB,motor * motor,float angle,int PB_ID,bool relative){
 }
 
 int i=0;
+//處理SPI封包
 void myCB(uint16_t *buffer, uint16_t length, AsyncMST info) {
 
-  // for(int ID=0;ID<2;ID++){
-    // if(int(info.packetID)==0){
   for(int i=0;i<3;i++){
     if(motor_list[3*(int(info.packetID))+i]->mPID==buffer[0]){
       motor_list[3*(int(info.packetID))+i]->Angle=buffer[1+i*3]*(1+(-2)*buffer[2+i*3]);
     }
   }
-    // }
-  // }
 }
 
 motor * max_motor_num[18];
@@ -150,6 +139,7 @@ void setup() {
   PB3.onTransfer(myCB);
   motor_list.setStorage(max_motor_num);
 
+  //自動建立motor類別
   for ( int i=0 ; i < motor_num ; i++){
     motor *motor1 = new motor(motor_sid,pins[motor_sid]);
     motor_list.push_back(motor1);
@@ -161,7 +151,7 @@ void setup() {
 
 
 int test=0;
-bool lock=false,menu_msg=true,show_angle=false,set_angle=false,show_msg=true,motor_set_sig=false;
+bool lock=false,menu_msg=true,show_angle=false,set_angle=false,show_msg=true,motor_set_sig=false,set_dis=true;
 String str,spt_str;
 char* result;
 const char * spliter=",";
@@ -178,9 +168,11 @@ bool show_target=false;
 
 
 void loop() {
+  //監聽各slave的SPI封包
   PB1.events();
   PB2.events();
   PB3.events();
+
   angle_arr.setStorage(max_angle_num);
   static uint32_t t = millis();
 
@@ -204,8 +196,6 @@ void loop() {
         Serial.print(i+1);
         Serial.print("'s angle: ");
         Serial.println((motor_list[i])->Angle);
-        // Serial.println(0.0001);
-        // Serial.println();
       }
     }
   }
@@ -213,10 +203,12 @@ void loop() {
 
   if(set_angle){
 
+    //顯示各motor的target value
     if(show_target){
       Serial.println();
       for (int i=0;i<motor_num;i++){
-        Serial.println(String("")+"Motor"+(i+1)+"'s target angle is "+motor_list[i]->target_angle);
+        if(set_dis) Serial.println(String("")+"Motor"+(i+1)+"'s target distance is "+ (motor_list[i]->target_angle)/36);
+        else Serial.println(String("")+"Motor"+(i+1)+"'s target angle is "+motor_list[i]->target_angle);
       }
       Serial.println();
       show_target=false;
@@ -224,7 +216,8 @@ void loop() {
 
     //顯示set angle menu資訊
     if(show_msg){
-      Serial.println("which motor do you want to set? 1 mean motor1 \n -1:exit \n -2:switch absolute/relate angle \n -3:multimotor input \n -4:show current motor's target value");
+      Serial.println("which motor do you want to set? 1 mean motor1 \n -1:exit \n -2:switch absolute/relate (default absolute)\n -3:multimotor input \n -4:show current motor's target value \n \
+                      -5:switch distance/angle input (default distance)");
       show_msg=false; 
     }
 
@@ -232,7 +225,8 @@ void loop() {
     if (array_message){
       Serial.println("Please input array");
       Serial.println("Attention : array 's elements quantities must be same as motor quantities");
-      Serial.println("eg : input 6 motor 's angle wiil be like 100,-100,150,0,12.7,-12.7 ");
+      if (!set_dis) Serial.println("eg : input 6 motor 's angle wiil be like 100,-100,150,0,12.7,-12.7 ");
+      else  Serial.println("eg : input 6 motor 's distance wiil be like 100,-100,150,0,12.7,-12.7 ");
       array_message=false;
     }
   }
@@ -270,16 +264,14 @@ void loop() {
 
     // 處理array input
     if(set_angle  && array_input && motor_set_sig){
-      // Serial.print("Array size: ");
-      // Serial.println(sizeof(angle_arr));
 
       for (int i=0;i<int(angle_arr.size());i++){
         if(i<3){
-          send_angle(&PB1,motor_list[i],angle_arr[i],1,relative);
+          send_angle(&PB1,motor_list[i],angle_arr[i],1,relative,set_dis);
         }else if(i<6){
-          send_angle(&PB2,motor_list[i],angle_arr[i],2,relative);
+          send_angle(&PB2,motor_list[i],angle_arr[i],2,relative,set_dis);
         }else if(i<9){
-          send_angle(&PB3,motor_list[i],angle_arr[i],3,relative);
+          send_angle(&PB3,motor_list[i],angle_arr[i],3,relative,set_dis);
         }
       }
       motor_select=-1;
@@ -292,13 +284,13 @@ void loop() {
     //處理single input
     if(set_angle && motor_set_sig && motor_select!=-1 && !array_input){
       if(motor_select<3){
-        send_angle(&PB1,motor_list[motor_select],val,1,relative);
+        send_angle(&PB1,motor_list[motor_select],val,1,relative,set_dis);
       }
       else if(motor_select<6){
-        send_angle(&PB2,motor_list[motor_select],val,2,relative);
+        send_angle(&PB2,motor_list[motor_select],val,2,relative,set_dis);
       }
       else if(motor_select<9){
-        send_angle(&PB3,motor_list[motor_select],val,3,relative);
+        send_angle(&PB3,motor_list[motor_select],val,3,relative,set_dis);
       }
       motor_select=-1;
       show_msg=true;
@@ -316,24 +308,29 @@ void loop() {
       }else if( val>0 && val<=motor_num){
         motor_set_sig=true;
         motor_select=int(val-1);
-        Serial.println(String("")+"current motor" + (motor_select+1) + "'target angle is " + motor_list[motor_select]->target_angle);
-        // Serial.print(motor_select+1);
-        // Serial.print("'target angle is ");
-        // Serial.println(motor_list[motor_select]->target_angle);
-        Serial.println("Please enter the angle");
+        if(set_dis) {
+          Serial.println(String("")+"current motor" + (motor_select+1) + "'target distance is " + (motor_list[motor_select]->target_angle)/36 + " mm");
+          Serial.println("Please enter the distance");
+        } 
+        else{
+          Serial.println(String("")+"current motor" + (motor_select+1) + "'target angle is " + motor_list[motor_select]->target_angle);
+          Serial.println("Please enter the angle");
+        }
       }else if(val==-2){
         relative=!relative;
-        if(relative) Serial.println("already change to relative mode");
-        else Serial.println("already change to absulte mode");
+        if(relative) Serial.println("change to relative mode");
+        else Serial.println("change to absulte mode");
         show_msg=true;
       }else if (val==-3){
         array_input=true;
         array_message=true;
-        // if(array_input) Serial.println("array input");
-        // else Serial.println("single input");
-        // show_msg=true;
       }else if (val==-4){
         show_target=true;
+        show_msg=true;
+      }else if (val==-5){
+        set_dis=!set_dis;
+        if(set_dis) Serial.println("switch input unit to distance(mm)");
+        else Serial.println("switch input unit to angle");
         show_msg=true;
       }else{
         Serial.println("Motor doesn't exist");
@@ -351,7 +348,7 @@ void loop() {
       
       if(int(val)==2){
         set_angle=true;
-        Serial.println("setting angle.....");
+        Serial.println("setting angle/distance.....");
         lock=true;
       }
     }
@@ -374,9 +371,9 @@ void loop() {
     lock=false;
   }
 
+  //slave LED輪流亮起
   if ( millis() - t > 1000 ) {
     
-    // Serial.println(test);
     PB1.digitalWrite(9,test==0);
     PB2.digitalWrite(9,test==1);
     PB3.digitalWrite(9,test==2);
